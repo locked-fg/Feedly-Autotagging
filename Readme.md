@@ -1,4 +1,4 @@
-# Feedly auto tagging project
+# Feedly auto tagging
 A simple proof of concept machine learning approach to automatically tag articles 
 in [Feedly](http://www.feedly.com) based on the recent tagging activity.
 The whole project is aimed to run on a Raspberry PI.
