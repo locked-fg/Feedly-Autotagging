@@ -8,11 +8,11 @@ from https://feedly.com/v3/auth/dev .
 
 The project also shows some nice usage of [Java8 Streams](http://www.oracle.com/technetwork/articles/java/ma14-java-se-8-streams-2177646.html).
 
-# how to run run
+# How to run
 ```
 git clone https://github.com/locked-fg/Feedly-Autotagging.git feedly-tagger
 ```
-Add a cron job that calles a shwll script:
+Add a cron job that calles a shell script:
 ```
 #/!bin/bash
 set -e
