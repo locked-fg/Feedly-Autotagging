@@ -17,7 +17,8 @@ Add a cron job that calles a shell script:
 #/!bin/bash
 set -e
 cd ~/feedly-tagger
-git pull origin master
+git fetch --all
+git reset --hard origin/master
 mvn clean compile assembly:single
 java -jar target/*.jar hereComesYourApiKey auto
 ```
