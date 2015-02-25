@@ -71,26 +71,6 @@ public class App {
         }
     }
 
-    private static boolean containsTag(Tag[] tags, String tag) {
-        if(tags == null) return false;
-        for (Tag t : tags) {
-            if (tag.equals(t.label)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean untagged(Tag[] tags) {
-        if(tags == null) return true;
-        for (Tag tag : tags) {
-            if (tag.label != null) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private static void processTag(final Tag tagObj, boolean autoMode, List<Tag> feedlyTags) {
         final long a = System.currentTimeMillis();
         final String tag = tagObj.label;
@@ -102,7 +82,7 @@ public class App {
         processEntries()
                 .forEach(e -> {
                     List<String> content = Utils.getAllContent(e);
-                    if (containsTag(e.tags, tag)) {
+                    if (Utils.containsTag(e.tags, tag)) {
                         bayes.add(tag, content);
                     } else if (!e.unread) {
                         bayes.add("", content);
@@ -112,22 +92,21 @@ public class App {
         log.info("recommend");
         processEntries()
                 .filter(e -> e.unread)
-                .filter(e -> untagged(e.tags))
+                .filter(e -> Utils.untagged(e.tags))
                 .forEach(entry -> {
+                    double p = bayes.docIsA(Utils.getAllContent(entry));
                     try {
-                        double p = bayes.docIsA(Utils.getAllContent(entry));
                         if (autoMode && p >= 0.95) {
-                            log.info(String.format("auto: %.2f: %s: %s %s tagged: %b, markRead: %b",
+                            log.info(String.format("auto: %.2f: %s: %s tagged: %b, markRead: %b",
                                             p, bayes.getName(),
                                             Utils.substr(entry.title, 40),
-                                            Utils.userTagsAsStrings(entry.tags),
                                             tagEntry(entry, bayes.getName(), feedlyTags),
                                             new Feedly(token).markAsread(entry))
                             );
                         }
                         if (!autoMode && p >= 0.6) {
-                            System.out.println(String.format("%.2f: %s: %s [%s]",
-                                            p, bayes.getName(), entry.title, Utils.userTagsAsStrings(entry.tags)));
+                            System.out.println(String.format("%.2f: %s: %s",
+                                            p, bayes.getName(), entry.title));
                             BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
                             if (br.readLine().trim().equals("j")) {
                                 tagEntry(entry, bayes.getName(), feedlyTags);

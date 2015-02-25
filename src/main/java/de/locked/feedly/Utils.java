@@ -34,22 +34,22 @@ public class Utils {
         return Hex.encodeHexString(md5.digest(s.getBytes()));
     }
 
-    static List<String> userTagsAsStrings(Tag[] tags) {
-        if (tags == null || tags.length == 0) {
-            return Arrays.asList("untagged");
-        } else {
-            List<String> list = Arrays.stream(tags)
-                    .map(t -> t.label)
-                    .filter(l -> l != null)
-                    .filter(l -> !l.isEmpty())
-                    .filter(l -> !l.startsWith("global."))
-                    .collect(Collectors.toList());
-            if (list.isEmpty()) {
-                list.add("untagged");
-            }
-            return list;
-        }
-    }
+//    static List<String> userTagsAsStrings(Tag[] tags) {
+//        if (tags == null || tags.length == 0) {
+//            return Arrays.asList("untagged");
+//        } else {
+//            List<String> list = Arrays.stream(tags)
+//                    .map(t -> t.label)
+//                    .filter(l -> l != null)
+//                    .filter(l -> !l.isEmpty())
+//                    .filter(l -> !l.startsWith("global."))
+//                    .collect(Collectors.toList());
+//            if (list.isEmpty()) {
+//                list.add("untagged");
+//            }
+//            return list;
+//        }
+//    }
 
     static String tagToString(Tag t) {
         String s = (t.label != null) ? t.label.trim() : "untagged";
@@ -141,7 +141,30 @@ public class Utils {
         }
     }
 
-    static String substr(String s, int length){
+    static String substr(String s, int length) {
         return s.length() < length ? s : s.substring(0, length);
     }
+
+    static boolean containsTag(Tag[] tags, String tag) {
+        if (tags != null) {
+            for (Tag t : tags) {
+                if (tag.equals(t.label)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    static boolean untagged(Tag[] tags) {
+        if (tags != null) {
+            for (Tag tag : tags) {
+                if (tag.label != null) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
 }
