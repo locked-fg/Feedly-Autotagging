@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.Serializable;
 import static java.lang.Math.min;
 import static java.lang.Math.max;
+import java.util.HashMap;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.mapdb.*;
@@ -14,24 +15,24 @@ public class Bayes {
 
     private static final int TOP_X_WORDS = 100;
 
-//    private final HashMap<String, Container> map = new HashMap<>();
-    private final HTreeMap<String, Container> map;
+    private final HashMap<String, Container> map = new HashMap<>();
+//    private final HTreeMap<String, Container> map;
     private final String name;
     private double na = 0;
     private double nb = 0;
-    private final DB db;
+//    private final DB db;
 
     Bayes(String tag) {
         this.name = tag;
         File dbLoc = new File("databases/");
         dbLoc.mkdir();
         
-        this.db = DBMaker.newFileDB(new File(dbLoc, tag + ".db"))
-                .closeOnJvmShutdown()
-                .deleteFilesAfterClose()
-                .transactionDisable()
-                .make();
-        map = this.db.getHashMap(name);
+//        this.db = DBMaker.newFileDB(new File(dbLoc, tag + ".db"))
+//                .closeOnJvmShutdown()
+//                .deleteFilesAfterClose()
+//                .transactionDisable()
+//                .make();
+//        map = this.db.getHashMap(name);
     }
 
     public String getName() {
@@ -39,7 +40,7 @@ public class Bayes {
     }
 
     void close(){
-        db.close();
+//        db.close();
     }
     
     private double isA(String word) {
@@ -48,8 +49,8 @@ public class Bayes {
             return .5;
         }
 
-        double pa = min(1, c.a / na); // c.a() x 2 due to PaulGraham
-        double pb = min(1, c.b / nb);
+        double pa = min(1, (double)c.a / na); // c.a() x 2 due to PaulGraham
+        double pb = min(1, (double)c.b / nb);
         double p = pa / (pa + pb);
         return max(.01, min(0.99, p)); // bind into [.01, .99]
     }
@@ -61,7 +62,7 @@ public class Bayes {
         return map.get(word.intern());
     }
 
-    public synchronized void add(String className, List<String> words) {
+    public void add(String className, List<String> words) {
         if (this.name.equals(className)) {
             addA(words);
         } else {
@@ -95,9 +96,6 @@ public class Bayes {
                 .sorted((p1, p2) -> -from05(p1, p2)) // sort by descending distance from 0.5
                 .limit(TOP_X_WORDS)
                 .collect(Collectors.toList());
-//        List<AbstractMap.SimpleEntry<String, Double>> psetMap = strings.stream()
-//                .map(str -> new AbstractMap.SimpleEntry<>(str, isA(str))) // get the probabilities
-//                .collect(Collectors.toList());
 
         double p = 1, np = 1;
         for (Double ap : pset) {
@@ -115,6 +113,6 @@ public class Bayes {
 
 class Container implements Serializable {
 
-    double a = 0;
-    double b = 0;
+    int a = 0;
+    int b = 0;
 }

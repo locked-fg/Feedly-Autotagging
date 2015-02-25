@@ -69,48 +69,53 @@ public class App {
         final List<String> tags = Utils.savedTags();
         tags.remove("untagged");
 
-        for (String tag : tags) {
-            final long a = System.currentTimeMillis();
-            log.info("start tag: " + tag);
-            Bayes bayes = new Bayes(tag);
-
-            log.info("train with tagged");
-            processEntries(tag, NONE, entry -> bayes.add(tag, Utils.getAllContent(entry)));
-
-            log.info("train with untagged");
-            processEntries("untagged", FALSE, entry -> bayes.add("untagged", Utils.getAllContent(entry)));
-
-            log.info("recommend");
-            processEntries("untagged", TRUE, entry -> {
-                try {
-                    double p = bayes.docIsA(Utils.getAllContent(entry));
-                    if (autoMode && p >= 0.95) {
-                        log.info(String.format("auto: %.2f: %s: %s %s tagged: %b, markRead: %b",
-                                p, bayes.getName(),
-                                Utils.substr(entry.title, 40),
-                                Utils.userTagsAsStrings(entry.tags),
-                                tagEntry(entry, bayes.getName(), feedlyTags),
-                                new Feedly(token).markAsread(entry))
-                        );
-
-                    }
-                    if (!autoMode && p >= 0.6) {
-                        System.out.println(String.format("%.2f: %s: %s [%s]",
-                                p, bayes.getName(), entry.title, Utils.userTagsAsStrings(entry.tags)));
-                        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-                        if (br.readLine().trim().equals("j")) {
-                            tagEntry(entry, bayes.getName(), feedlyTags);
-                        }
-                    }
-                } catch (IOException ex) {
-                    log.fatal("something went brutally wrong", ex);
-                }
-            });
-            bayes.close();
-
-            final long b = System.currentTimeMillis();
-            log.info(String.format("recommendation run took: %.2fs", (b - a) / 1000d));
+        for (final String tag : tags) {
+            processTag(tag, autoMode, feedlyTags);
         }
+    }
+
+    private static void processTag(final String tag, boolean autoMode, final Tag[] feedlyTags) {
+        final long a = System.currentTimeMillis();
+        log.info("start tag: " + tag);
+        Bayes bayes = new Bayes(tag);
+        
+        log.info("train with tagged");
+        processEntries(tag, NONE, entry -> bayes.add(tag, Utils.getAllContent(entry)));
+        
+        log.info("train with untagged");
+        processEntries("untagged", FALSE, entry -> bayes.add("untagged", Utils.getAllContent(entry)));
+        
+        log.info("recommend");
+        processEntries("untagged", TRUE, entry -> {
+            try {
+                double p = bayes.docIsA(Utils.getAllContent(entry));
+                if (autoMode && p >= 0.95) {
+                    log.info(String.format("auto: %.2f: %s: %s %s tagged: %b, markRead: %b",
+                            p, bayes.getName(),
+                            Utils.substr(entry.title, 40),
+                            Utils.userTagsAsStrings(entry.tags),
+                            tagEntry(entry, bayes.getName(), feedlyTags),
+                            new Feedly(token).markAsread(entry))
+                    );
+                    
+                }
+                if (!autoMode && p >= 0.6) {
+                    System.out.println(String.format("%.2f: %s: %s [%s]",
+                            p, bayes.getName(), entry.title, Utils.userTagsAsStrings(entry.tags)));
+                    BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+                    if (br.readLine().trim().equals("j")) {
+                        tagEntry(entry, bayes.getName(), feedlyTags);
+                    }
+                }
+            } catch (IOException ex) {
+                log.fatal("something went brutally wrong", ex);
+            }
+        });
+        bayes.close();
+        
+        final long b = System.currentTimeMillis();
+        log.info(String.format("recommendation run took: %.2fs", (b - a) / 1000d));
+        System.gc();
     }
 
     private static void getData() throws Exception {
