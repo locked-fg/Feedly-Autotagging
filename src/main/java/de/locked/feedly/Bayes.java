@@ -15,24 +15,25 @@ public class Bayes {
 
     private static final int TOP_X_WORDS = 100;
 
-    private final HashMap<String, Container> map = new HashMap<>();
-//    private final HTreeMap<String, Container> map;
+//    private final HashMap<String, Container> map = new HashMap<>();
+    private final HTreeMap<String, Container> map;
     private final String name;
     private double na = 0;
     private double nb = 0;
-//    private final DB db;
+    private final DB db;
 
     Bayes(String tag) {
         this.name = tag;
         File dbLoc = new File("databases/");
         dbLoc.mkdir();
         
-//        this.db = DBMaker.newFileDB(new File(dbLoc, tag + ".db"))
-//                .closeOnJvmShutdown()
-//                .deleteFilesAfterClose()
-//                .transactionDisable()
-//                .make();
-//        map = this.db.getHashMap(name);
+        this.db = DBMaker.newFileDB(new File(dbLoc, tag + ".db"))
+                .closeOnJvmShutdown()
+                .deleteFilesAfterClose()
+                .transactionDisable()
+                .cacheWeakRefEnable()
+                .make();
+        map = this.db.getHashMap(name);
     }
 
     public String getName() {
@@ -40,7 +41,7 @@ public class Bayes {
     }
 
     void close(){
-//        db.close();
+        db.close();
     }
     
     private double isA(String word) {

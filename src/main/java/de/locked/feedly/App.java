@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
@@ -44,104 +46,122 @@ public class App {
         log.info("deleting data");
         File data = new File("data");
         if (data.exists()) {
-            for (File tagDir : data.listFiles()) {
-                for (File f : tagDir.listFiles()) {
-                    f.delete();
-                }
-                tagDir.delete();
+            for (File f : data.listFiles()) {
+                f.delete();
             }
         }
     }
 
-    private static void processEntries(String tag, Optional<Boolean> unread, Consumer<Entry> action) {
-        Arrays.stream(new File("data/" + tag).listFiles())
+    private static Stream<Entry> processEntries() {
+        return Arrays.stream(new File("data").listFiles())
                 .map(Utils::toEntry)
                 .filter(Optional::isPresent)
-                .map(Optional::get)
-                .filter(o -> !unread.isPresent() || unread.get() == o.unread)
-                .forEach(action);
+                .map(Optional::get);
     }
 
     private static void recommendTag(boolean autoMode) throws IOException {
         log.info("recommending");
 
-        final Tag[] feedlyTags = new Feedly(token).getTags();
-        final List<String> tags = Utils.savedTags();
-        tags.remove("untagged");
+        List<Tag> tags = Arrays.stream(new Feedly(token).getTags())
+                .filter(t -> t.label != null)
+                .collect(Collectors.toList());
 
-        for (final String tag : tags) {
-            processTag(tag, autoMode, feedlyTags);
+        for (Tag tag : tags) {
+            processTag(tag, autoMode, tags);
         }
     }
 
-    private static void processTag(final String tag, boolean autoMode, final Tag[] feedlyTags) {
+    private static boolean containsTag(Tag[] tags, String tag) {
+        if(tags == null) return false;
+        for (Tag t : tags) {
+            if (tag.equals(t.label)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean untagged(Tag[] tags) {
+        if(tags == null) return true;
+        for (Tag tag : tags) {
+            if (tag.label != null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void processTag(final Tag tagObj, boolean autoMode, List<Tag> feedlyTags) {
         final long a = System.currentTimeMillis();
+        final String tag = tagObj.label;
+
         log.info("start tag: " + tag);
         Bayes bayes = new Bayes(tag);
-        
-        log.info("train with tagged");
-        processEntries(tag, NONE, entry -> bayes.add(tag, Utils.getAllContent(entry)));
-        
-        log.info("train with untagged");
-        processEntries("untagged", FALSE, entry -> bayes.add("untagged", Utils.getAllContent(entry)));
-        
-        log.info("recommend");
-        processEntries("untagged", TRUE, entry -> {
-            try {
-                double p = bayes.docIsA(Utils.getAllContent(entry));
-                if (autoMode && p >= 0.95) {
-                    log.info(String.format("auto: %.2f: %s: %s %s tagged: %b, markRead: %b",
-                            p, bayes.getName(),
-                            Utils.substr(entry.title, 40),
-                            Utils.userTagsAsStrings(entry.tags),
-                            tagEntry(entry, bayes.getName(), feedlyTags),
-                            new Feedly(token).markAsread(entry))
-                    );
-                    
-                }
-                if (!autoMode && p >= 0.6) {
-                    System.out.println(String.format("%.2f: %s: %s [%s]",
-                            p, bayes.getName(), entry.title, Utils.userTagsAsStrings(entry.tags)));
-                    BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-                    if (br.readLine().trim().equals("j")) {
-                        tagEntry(entry, bayes.getName(), feedlyTags);
+
+        log.info("train");
+        processEntries()
+                .forEach(e -> {
+                    List<String> content = Utils.getAllContent(e);
+                    if (containsTag(e.tags, tag)) {
+                        bayes.add(tag, content);
+                    } else if (!e.unread) {
+                        bayes.add("", content);
                     }
-                }
-            } catch (IOException ex) {
-                log.fatal("something went brutally wrong", ex);
-            }
-        });
+                });
+
+        log.info("recommend");
+        processEntries()
+                .filter(e -> e.unread)
+                .filter(e -> untagged(e.tags))
+                .forEach(entry -> {
+                    try {
+                        double p = bayes.docIsA(Utils.getAllContent(entry));
+                        if (autoMode && p >= 0.95) {
+                            log.info(String.format("auto: %.2f: %s: %s %s tagged: %b, markRead: %b",
+                                            p, bayes.getName(),
+                                            Utils.substr(entry.title, 40),
+                                            Utils.userTagsAsStrings(entry.tags),
+                                            tagEntry(entry, bayes.getName(), feedlyTags),
+                                            new Feedly(token).markAsread(entry))
+                            );
+                        }
+                        if (!autoMode && p >= 0.6) {
+                            System.out.println(String.format("%.2f: %s: %s [%s]",
+                                            p, bayes.getName(), entry.title, Utils.userTagsAsStrings(entry.tags)));
+                            BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+                            if (br.readLine().trim().equals("j")) {
+                                tagEntry(entry, bayes.getName(), feedlyTags);
+                            }
+                        }
+                    } catch (IOException ex) {
+                        log.fatal("something went brutally wrong", ex);
+                    }
+                });
         bayes.close();
-        
+
         final long b = System.currentTimeMillis();
         log.info(String.format("recommendation run took: %.2fs", (b - a) / 1000d));
-        System.gc();
     }
 
     private static void getData() throws Exception {
         log.info("getting data");
         Feedly urls = new Feedly(token);
-
+        Gson gson = new Gson();
         for (Category cat : urls.getCategories()) {
             log.info("getting entries for category: " + cat.label);
-
             for (Entry entry : urls.getStreamContents(cat.id).items) {
-                for (String tag : Utils.userTagsAsStrings(entry.tags)) {
-                    File dir = new File("data", tag);
-                    dir.mkdirs();
-                    File f = new File(dir, Utils.hash(entry.id) + ".txt");
-                    if (!f.exists()) {
-                        log.info("new Entry: " + f.getAbsolutePath());
-                        String json = new Gson().toJson(entry);
-                        Files.write(f.toPath(), json.getBytes(), StandardOpenOption.CREATE);
-                    }
+                File f = new File("data", Utils.hash(entry.id) + ".txt");
+                if (!f.exists()) {
+                    log.info("new Entry: " + f.getAbsolutePath());
+                    String json = gson.toJson(entry);
+                    Files.write(f.toPath(), json.getBytes(), StandardOpenOption.CREATE);
                 }
             }
         }
         System.gc();
     }
 
-    private static boolean tagEntry(final Entry entry, String tagName, Tag[] feedlyTags) throws IOException {
+    private static boolean tagEntry(final Entry entry, String tagName, List<Tag> feedlyTags) throws IOException {
         final Feedly urls = new Feedly(token);
         for (Tag ft : feedlyTags) {
             if (tagName.equals(ft.label)) {
