@@ -32,7 +32,7 @@ public class App {
         PropertyConfigurator.configure(App.class.getClassLoader().getResourceAsStream("logging.properties"));
         // get the API token from https://feedly.com/v3/auth/dev
         token = args[0];
-        
+
         delData();
         getData();
 
@@ -107,7 +107,7 @@ public class App {
                 }
             });
             bayes.close();
-            
+
             final long b = System.currentTimeMillis();
             log.info(String.format("recommendation run took: %.2fs", (b - a) / 1000d));
         }
@@ -133,6 +133,7 @@ public class App {
                 }
             }
         }
+        System.gc();
     }
 
     private static boolean tagEntry(final Entry entry, String tagName, Tag[] feedlyTags) throws IOException {
