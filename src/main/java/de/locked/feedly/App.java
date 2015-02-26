@@ -127,11 +127,13 @@ public class App {
         log.info("getting data");
         Feedly urls = new Feedly(token);
         Gson gson = new Gson();
+        File data = new File("data");
+        data.mkdir();
         for (Category cat : urls.getCategories()) {
             log.info("getting entries for category: " + cat.label);
             List<Entry> contents = urls.getAllStreamContents(cat.id);
             for (Entry entry : contents) {
-                File f = new File("data", Utils.hash(entry.id) + ".txt");
+                File f = new File(data, Utils.hash(entry.id) + ".txt");
                 Files.write(f.toPath(), gson.toJson(entry).getBytes(), CREATE, TRUNCATE_EXISTING);
             }
         }
