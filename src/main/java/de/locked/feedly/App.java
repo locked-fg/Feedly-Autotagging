@@ -131,7 +131,7 @@ public class App {
             for (Entry entry : urls.getStreamContents(cat.id).items) {
                 File f = new File("data", Utils.hash(entry.id) + ".txt");
                 if (!f.exists()) {
-                    log.info("new Entry: " + f.getAbsolutePath());
+                    log.debug("new Entry: " + f.getAbsolutePath());
                     String json = gson.toJson(entry);
                     Files.write(f.toPath(), json.getBytes(), StandardOpenOption.CREATE);
                 }
