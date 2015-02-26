@@ -31,7 +31,6 @@ public class Bayes {
                 .closeOnJvmShutdown()
                 .deleteFilesAfterClose()
                 .transactionDisable()
-                .cacheWeakRefEnable()
                 .make();
         map = this.db.getHashMap(name);
     }

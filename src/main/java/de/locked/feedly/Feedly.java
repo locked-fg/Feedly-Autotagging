@@ -9,7 +9,13 @@ import de.locked.feedly.feedly.StreamContent;
 import de.locked.feedly.feedly.Tag;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import org.apache.http.client.fluent.Request;
 import org.apache.http.entity.ContentType;
 import org.apache.http.message.BasicHeader;
@@ -38,19 +44,36 @@ public class Feedly {
     // https://developer.feedly.com/v3/streams/
     // continuation
     // count 20-10.000
-    public StreamContent getStreamContents(String id) throws IOException {
-        return new Gson().fromJson(getStreamContentsAsString(id), StreamContent.class);
+    public List<Entry> getAllStreamContents(String id) throws IOException, URISyntaxException {
+        StreamContent stream = getStreamContents(id);
+        List<Entry> entries = new ArrayList<>(Arrays.asList(stream.items));
+
+        while (stream.continuation != null) {
+            stream = getStreamContents(id, stream.continuation);
+            entries.addAll(Arrays.asList(stream.items));
+        }
+        return entries;
     }
 
-    public String getStreamContentsAsString(String id) throws IOException {
-        return Request.Get(base + "streams/contents?streamId=" + enc(id) + "&count=10000")
-                .setHeader(auth).execute().returnContent().asString();
+    public StreamContent getStreamContents(String id) throws IOException, URISyntaxException {
+        URI uri = new URI(base + "streams/contents?streamId=" + enc(id) + "&count=500");
+        return getStreamContents(uri);
+    }
+
+    public StreamContent getStreamContents(String id, String continuation) throws IOException, URISyntaxException {
+        URI uri = new URI(base + "streams/contents?streamId=" + enc(id) + "&count=500&continuation=" + enc(continuation));
+        return getStreamContents(uri);
+    }
+
+    public StreamContent getStreamContents(URI uri) throws IOException {
+        String data = Request.Get(uri).setHeader(auth).execute().returnContent().asString();
+        return new Gson().fromJson(data, StreamContent.class);
     }
 
     boolean tagEntry(Entry entry, Tag tag) throws IOException {
         JsonObject o = new JsonObject();
         o.addProperty("entryId", entry.id);
-        return exec(Request.Put(base + "tags/" + enc(tag.id)),o);
+        return exec(Request.Put(base + "tags/" + enc(tag.id)), o);
     }
 
     boolean untagEntry(Entry entry, Tag tag) throws IOException {

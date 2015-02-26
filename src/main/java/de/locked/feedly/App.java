@@ -9,12 +9,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
+import static java.nio.file.StandardOpenOption.*;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.Properties;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.log4j.LogManager;
@@ -24,10 +22,6 @@ import org.apache.log4j.PropertyConfigurator;
 public class App {
 
     private static final Logger log = LogManager.getLogger(App.class);
-
-    private static final Optional<Boolean> NONE = Optional.empty();
-    private static final Optional<Boolean> TRUE = Optional.of(true);
-    private static final Optional<Boolean> FALSE = Optional.of(false);
     private static String token;
 
     public static void main(String[] args) throws Exception {
@@ -47,6 +41,12 @@ public class App {
         File data = new File("data");
         if (data.exists()) {
             for (File f : data.listFiles()) {
+                f.delete();
+            }
+        }
+        File data2 = new File("databases");
+        if (data2.exists()) {
+            for (File f : data2.listFiles()) {
                 f.delete();
             }
         }
@@ -95,6 +95,7 @@ public class App {
                 .filter(e -> Utils.untagged(e.tags))
                 .forEach(entry -> {
                     double p = bayes.docIsA(Utils.getAllContent(entry));
+                    log.debug(String.format("%s : %.02f : %s", tag, p, entry.title));
                     try {
                         if (autoMode && p >= 0.95) {
                             log.info(String.format("auto: %.2f: %s: %s tagged: %b, markRead: %b",
@@ -128,13 +129,10 @@ public class App {
         Gson gson = new Gson();
         for (Category cat : urls.getCategories()) {
             log.info("getting entries for category: " + cat.label);
-            for (Entry entry : urls.getStreamContents(cat.id).items) {
+            List<Entry> contents = urls.getAllStreamContents(cat.id);
+            for (Entry entry : contents) {
                 File f = new File("data", Utils.hash(entry.id) + ".txt");
-                if (!f.exists()) {
-                    log.debug("new Entry: " + f.getAbsolutePath());
-                    String json = gson.toJson(entry);
-                    Files.write(f.toPath(), json.getBytes(), StandardOpenOption.CREATE);
-                }
+                Files.write(f.toPath(), gson.toJson(entry).getBytes(), CREATE, TRUNCATE_EXISTING);
             }
         }
         System.gc();
