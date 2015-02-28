@@ -49,7 +49,7 @@ public class Bayes {
             return .5;
         }
 
-        double pa = min(1, (double)c.a / na); // c.a() x 2 due to PaulGraham
+        double pa = min(1, (double)c.a*2 / na); // c.a x 2 due to PaulGraham
         double pb = min(1, (double)c.b / nb);
         double p = pa / (pa + pb);
         return max(.01, min(0.99, p)); // bind into [.01, .99]
