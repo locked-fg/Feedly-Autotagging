@@ -14,20 +14,14 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import static java.nio.file.StandardOpenOption.*;
 import java.security.NoSuchAlgorithmException;
+import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
@@ -38,6 +32,10 @@ public class App {
     private static final Logger log = LogManager.getLogger(App.class);
     private static final boolean useDB = false;
     private static String token;
+    private static final double autoTagThreshold = 0.9;
+
+    // params evaluated through test()
+    private static final BayesCfg BAYES_CFG = new BayesCfg(1, 0.98, 0.02);
 
     public static void main(String[] args) throws Exception {
         PropertyConfigurator.configure(App.class.getClassLoader().getResourceAsStream("logging.properties"));
@@ -102,7 +100,7 @@ public class App {
                         bayes.add("", content);
                     }
                 });
-        bayes.reduce(new BayesCfg(1, 0.96, 0.04)); // params evaluated through test()
+        bayes.reduce(BAYES_CFG);
 
         log.info("recommend");
         processEntries()
@@ -112,7 +110,7 @@ public class App {
                     double p = bayes.docIsA(Utils.getAllContent(entry));
                     log.debug(String.format("%s : %.02f : %s", tag, p, entry.title));
                     try {
-                        if (autoMode && p >= 0.95) {
+                        if (autoMode && p >= autoTagThreshold) {
                             log.info(String.format("auto: %.2f: %s: %s tagged: %b, markRead: %b",
                                             p, bayes.getName(),
                                             Utils.substr(entry.title, 40),
@@ -178,110 +176,106 @@ public class App {
         log.info("testing");
         Tag[] tags = new Feedly(token).getTags();
 
+        int folds = 15;
+        // params in BayesCfg
         int[] minDocs = {1};
         double[] maxDocPs = {0.98, 0.97, 0.96, 0.95};
-        double[] minPs = {0.00, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06};
+        double[] minPs = {0.00, 0.01, 0.02, 0.03, 0.04, 0.05};
 
-        // could do something with CompletableFuture?
-        List<BayesCfg> results = Collections.synchronizedList(new ArrayList<>());
-        ExecutorService es = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+        List<BayesCfg> configs = new ArrayList<>();
         for (int minDoc : minDocs) {
             for (double maxDocP : maxDocPs) {
                 for (double minP : minPs) {
-                    es.submit(() -> {
-                        BayesCfg cfg = new BayesCfg(minDoc, maxDocP, minP);
-                        cfg.f = test(tags, cfg);
-                        results.add(cfg);
-                        return null;
-                    });
+                    configs.add(new BayesCfg(minDoc, maxDocP, minP));
                 }
             }
         }
-        es.shutdown();
-        es.awaitTermination(1, TimeUnit.DAYS);
 
-        BayesCfg x = results.stream()
-                .sorted(Collections.reverseOrder())
+        SimpleEntry<BayesCfg, Double> x = configs.stream().parallel()
+                .map(config -> {
+                    double f = IntStream.rangeClosed(1, folds).asDoubleStream()
+                    .map(i -> test(tags, config)) // compute f measure
+                    .filter(d -> !Double.isNaN(d))
+                    .summaryStatistics().getAverage();
+                    return new SimpleEntry<>(config, f);
+                })
+                .sorted((o1, o2) -> -1 * Double.compare(o1.getValue(), o2.getValue())) // sort reversed!
                 .findFirst()
                 .get();
         log.info("best cfg: " + x);
-
     }
 
-    private static double test(Tag[] tags, BayesCfg cfg) throws IOException {
+    private static Double test(Tag[] tags, BayesCfg cfg) {
         double testRatio = 0.1;
-        double pThreshold = 0.9;
+        double pThreshold = autoTagThreshold;
+
         double tp = 0;
         double tn = 0;
         double fp = 0;
         double fn = 0;
-        int testIterations = 15;
 
-        for (int i = 1; i <= testIterations; i++) {
-            log.info("iteration " + i);
-            Map<String, Bayes> classifiers = Arrays.stream(tags)
-                    .filter(t -> t.label != null)
-                    .map(tag -> new Bayes(tag.label, false))
-                    .collect(Collectors.toMap(b -> b.getName(), b -> b));
+        Map<String, Bayes> classifiers = Arrays.stream(tags)
+                .filter(t -> t.label != null)
+                .map(tag -> new Bayes(tag.label, false))
+                .collect(Collectors.toMap(b -> b.getName(), b -> b));
 
 //            log.info("split train / test");
-            Multimap<String, Entry> train = ArrayListMultimap.create();
-            Multimap<String, Entry> test = ArrayListMultimap.create();
-            processEntries()
-                    .forEach(e -> {
-                        String label = Utils.untagged(e.tags) ? "untagged" : e.tags[0].label;
-                        Multimap<String, Entry> target = Math.random() < testRatio ? test : train;
-                        target.put(label, e);
-                    });
+        Multimap<String, Entry> train = ArrayListMultimap.create();
+        Multimap<String, Entry> test = ArrayListMultimap.create();
+        processEntries()
+                .forEach(e -> {
+                    String label = Utils.untagged(e.tags) ? "untagged" : e.tags[0].label;
+                    Multimap<String, Entry> target = Math.random() < testRatio ? test : train;
+                    target.put(label, e);
+                });
 
 //            log.info("train");
-            for (String k : train.keySet()) {
-                for (Entry e : train.get(k)) {
-                    List<String> content = Utils.getAllContent(e);
-                    for (Bayes b : classifiers.values()) {
-                        b.add(k, content);
-                    }
+        for (String k : train.keySet()) {
+            for (Entry e : train.get(k)) {
+                List<String> content = Utils.getAllContent(e);
+                for (Bayes b : classifiers.values()) {
+                    b.add(k, content);
                 }
             }
-            for (Bayes b : classifiers.values()) {
-                b.reduce(cfg);
-            }
+        }
+        for (Bayes b : classifiers.values()) {
+            b.reduce(cfg);
+        }
 
 //            log.info("test");
-            for (String k : test.keySet()) {
-                for (Entry e : test.get(k)) {
-                    List<String> content = Utils.getAllContent(e);
-                    for (Bayes b : classifiers.values()) {
-                        boolean match = b.docIsA(content) > pThreshold;
-                        boolean shouldMatch = k.equals(b.getName());
-                        if (match && shouldMatch) {
-                            tp++;
-                        } else if (match && !shouldMatch) {
-                            fp++;
-                        } else if (!match && shouldMatch) {
-                            fn++;
-                        } else if (!match && !shouldMatch) {
-                            tn++;
-                        }
+        for (String k : test.keySet()) {
+            for (Entry e : test.get(k)) {
+                List<String> content = Utils.getAllContent(e);
+                for (Bayes b : classifiers.values()) {
+                    boolean match = b.docIsA(content) > pThreshold;
+                    boolean shouldMatch = k.equals(b.getName());
+                    if (match && shouldMatch) {
+                        tp++;
+                    } else if (match && !shouldMatch) {
+                        fp++;
+                    } else if (!match && shouldMatch) {
+                        fn++;
+                    } else if (!match && !shouldMatch) {
+                        tn++;
                     }
                 }
             }
         }
         double precision = tp / (tp + fp);
         double recall = tp / (tp + fn);
-        double beta2 = Math.pow(0.5, 2);
+        double beta2 = Math.pow(0.5, 2); // f(0.5) - put weight on precision
         double f = (1 + beta2) * (precision * recall) / (beta2 * precision + recall);
-        log.info(String.format("F-Measure: %.02f", f));
+        log.info(String.format("F-Measure: %.02f with %s \t Precision: %.02f, Recall: %.02f",
+                f, cfg, precision, recall));
         return f;
     }
 }
 
-class BayesCfg implements Comparable<BayesCfg> {
+class BayesCfg {
 
     int minDoc;
     double maxDocP;
     double minP;
-    double f;
 
     public BayesCfg(int minDoc, double maxDocP, double minP) {
         this.minDoc = minDoc;
@@ -291,11 +285,6 @@ class BayesCfg implements Comparable<BayesCfg> {
 
     @Override
     public String toString() {
-        return "TestCfg{" + "minDoc=" + minDoc + ", maxDocP=" + maxDocP + ", minP=" + minP + ", f=" + f + '}';
-    }
-
-    @Override
-    public int compareTo(BayesCfg o) {
-        return Double.compare(f, o.f);
+        return "BayesCfg{" + "minDoc=" + minDoc + ", maxDocP=" + maxDocP + ", minP=" + minP + '}';
     }
 }
