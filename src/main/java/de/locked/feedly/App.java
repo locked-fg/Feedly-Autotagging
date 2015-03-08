@@ -1,8 +1,11 @@
 package de.locked.feedly;
 
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Multimap;
 import com.google.gson.Gson;
 import de.locked.feedly.feedly.Category;
 import de.locked.feedly.feedly.Entry;
+import de.locked.feedly.feedly.StreamContent;
 import de.locked.feedly.feedly.Tag;
 import java.io.BufferedReader;
 import java.io.File;
@@ -10,9 +13,20 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import static java.nio.file.StandardOpenOption.*;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.log4j.LogManager;
@@ -22,6 +36,7 @@ import org.apache.log4j.PropertyConfigurator;
 public class App {
 
     private static final Logger log = LogManager.getLogger(App.class);
+    private static final boolean useDB = false;
     private static String token;
 
     public static void main(String[] args) throws Exception {
@@ -31,9 +46,9 @@ public class App {
 
         delData();
         getData();
-
         boolean auto = args.length > 1 && args[1].equals("auto");
         recommendTag(auto);
+//        test();
     }
 
     private static void delData() {
@@ -61,7 +76,6 @@ public class App {
 
     private static void recommendTag(boolean autoMode) throws IOException {
         log.info("recommending");
-
         List<Tag> tags = Arrays.stream(new Feedly(token).getTags())
                 .filter(t -> t.label != null)
                 .collect(Collectors.toList());
@@ -76,7 +90,7 @@ public class App {
         final String tag = tagObj.label;
 
         log.info("start tag: " + tag);
-        Bayes bayes = new Bayes(tag);
+        Bayes bayes = new Bayes(tag, useDB);
 
         log.info("train");
         processEntries()
@@ -88,6 +102,7 @@ public class App {
                         bayes.add("", content);
                     }
                 });
+        bayes.reduce(new BayesCfg(1, 0.96, 0.04)); // params evaluated through test()
 
         log.info("recommend");
         processEntries()
@@ -126,18 +141,27 @@ public class App {
     private static void getData() throws Exception {
         log.info("getting data");
         Feedly urls = new Feedly(token);
+        for (Category cat : urls.getCategories()) {
+            log.info("getting entries for category: " + cat.label);
+            StreamContent stream = urls.getStreamContents(cat.id);
+            saveEntries(stream.items);
+            while (stream.continuation != null) {
+                stream = urls.getStreamContents(cat.id, stream.continuation);
+                saveEntries(stream.items);
+            }
+
+        }
+    }
+
+    private static void saveEntries(Entry[] entries) throws NoSuchAlgorithmException, IOException {
         Gson gson = new Gson();
         File data = new File("data");
         data.mkdir();
-        for (Category cat : urls.getCategories()) {
-            log.info("getting entries for category: " + cat.label);
-            List<Entry> contents = urls.getAllStreamContents(cat.id);
-            for (Entry entry : contents) {
-                File f = new File(data, Utils.hash(entry.id) + ".txt");
-                Files.write(f.toPath(), gson.toJson(entry).getBytes(), CREATE, TRUNCATE_EXISTING);
-            }
+        for (Entry entry : entries) {
+            File f = new File(data, Utils.hash(entry.id) + ".txt");
+            Files.write(f.toPath(), gson.toJson(entry).getBytes(), CREATE, TRUNCATE_EXISTING);
+            // f.deleteOnExit();
         }
-        System.gc();
     }
 
     private static boolean tagEntry(final Entry entry, String tagName, List<Tag> feedlyTags) throws IOException {
@@ -148,5 +172,130 @@ public class App {
             }
         }
         return false;
+    }
+
+    private static void test() throws Exception {
+        log.info("testing");
+        Tag[] tags = new Feedly(token).getTags();
+
+        int[] minDocs = {1};
+        double[] maxDocPs = {0.98, 0.97, 0.96, 0.95};
+        double[] minPs = {0.00, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06};
+
+        // could do something with CompletableFuture?
+        List<BayesCfg> results = Collections.synchronizedList(new ArrayList<>());
+        ExecutorService es = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+        for (int minDoc : minDocs) {
+            for (double maxDocP : maxDocPs) {
+                for (double minP : minPs) {
+                    es.submit(() -> {
+                        BayesCfg cfg = new BayesCfg(minDoc, maxDocP, minP);
+                        cfg.f = test(tags, cfg);
+                        results.add(cfg);
+                        return null;
+                    });
+                }
+            }
+        }
+        es.shutdown();
+        es.awaitTermination(1, TimeUnit.DAYS);
+
+        BayesCfg x = results.stream()
+                .sorted(Collections.reverseOrder())
+                .findFirst()
+                .get();
+        log.info("best cfg: " + x);
+
+    }
+
+    private static double test(Tag[] tags, BayesCfg cfg) throws IOException {
+        double testRatio = 0.1;
+        double pThreshold = 0.9;
+        double tp = 0;
+        double tn = 0;
+        double fp = 0;
+        double fn = 0;
+        int testIterations = 15;
+
+        for (int i = 1; i <= testIterations; i++) {
+            log.info("iteration " + i);
+            Map<String, Bayes> classifiers = Arrays.stream(tags)
+                    .filter(t -> t.label != null)
+                    .map(tag -> new Bayes(tag.label, false))
+                    .collect(Collectors.toMap(b -> b.getName(), b -> b));
+
+//            log.info("split train / test");
+            Multimap<String, Entry> train = ArrayListMultimap.create();
+            Multimap<String, Entry> test = ArrayListMultimap.create();
+            processEntries()
+                    .forEach(e -> {
+                        String label = Utils.untagged(e.tags) ? "untagged" : e.tags[0].label;
+                        Multimap<String, Entry> target = Math.random() < testRatio ? test : train;
+                        target.put(label, e);
+                    });
+
+//            log.info("train");
+            for (String k : train.keySet()) {
+                for (Entry e : train.get(k)) {
+                    List<String> content = Utils.getAllContent(e);
+                    for (Bayes b : classifiers.values()) {
+                        b.add(k, content);
+                    }
+                }
+            }
+            for (Bayes b : classifiers.values()) {
+                b.reduce(cfg);
+            }
+
+//            log.info("test");
+            for (String k : test.keySet()) {
+                for (Entry e : test.get(k)) {
+                    List<String> content = Utils.getAllContent(e);
+                    for (Bayes b : classifiers.values()) {
+                        boolean match = b.docIsA(content) > pThreshold;
+                        boolean shouldMatch = k.equals(b.getName());
+                        if (match && shouldMatch) {
+                            tp++;
+                        } else if (match && !shouldMatch) {
+                            fp++;
+                        } else if (!match && shouldMatch) {
+                            fn++;
+                        } else if (!match && !shouldMatch) {
+                            tn++;
+                        }
+                    }
+                }
+            }
+        }
+        double precision = tp / (tp + fp);
+        double recall = tp / (tp + fn);
+        double beta2 = Math.pow(0.5, 2);
+        double f = (1 + beta2) * (precision * recall) / (beta2 * precision + recall);
+        log.info(String.format("F-Measure: %.02f", f));
+        return f;
+    }
+}
+
+class BayesCfg implements Comparable<BayesCfg> {
+
+    int minDoc;
+    double maxDocP;
+    double minP;
+    double f;
+
+    public BayesCfg(int minDoc, double maxDocP, double minP) {
+        this.minDoc = minDoc;
+        this.maxDocP = maxDocP;
+        this.minP = minP;
+    }
+
+    @Override
+    public String toString() {
+        return "TestCfg{" + "minDoc=" + minDoc + ", maxDocP=" + maxDocP + ", minP=" + minP + ", f=" + f + '}';
+    }
+
+    @Override
+    public int compareTo(BayesCfg o) {
+        return Double.compare(f, o.f);
     }
 }
