@@ -15,28 +15,31 @@ import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import javax.imageio.IIOException;
 import org.apache.http.client.fluent.Request;
 import org.apache.http.entity.ContentType;
 import org.apache.http.message.BasicHeader;
+import org.apache.log4j.LogManager;
+import org.apache.log4j.Logger;
 
 public class Feedly {
 
+    private static final Logger log = LogManager.getLogger(Feedly.class);
     private final String base = "http://cloud.feedly.com/v3/";
     private final BasicHeader auth;
+    private static int requests = 0;
 
     public Feedly(String accessToken) {
         auth = new BasicHeader("Authorization", accessToken);
     }
 
     public Category[] getCategories() throws IOException {
-        String json = Request.Get(base + "categories")
-                .setHeader(auth).execute().returnContent().asString();
+        String json = getAsString(base + "categories");
         return new Gson().fromJson(json, Category[].class);
     }
 
     public Tag[] getTags() throws IOException {
-        String json = Request.Get(base + "tags")
-                .setHeader(auth).execute().returnContent().asString();
+        String json = getAsString(base + "tags");
         return new Gson().fromJson(json, Tag[].class);
     }
 
@@ -55,17 +58,17 @@ public class Feedly {
     }
 
     public StreamContent getStreamContents(String id) throws IOException, URISyntaxException {
-        URI uri = new URI(base + "streams/contents?streamId=" + enc(id) + "&count=500");
+        URI uri = new URI(base + "streams/contents?streamId=" + enc(id) + "&count=10000");
         return getStreamContents(uri);
     }
 
     public StreamContent getStreamContents(String id, String continuation) throws IOException, URISyntaxException {
-        URI uri = new URI(base + "streams/contents?streamId=" + enc(id) + "&count=500&continuation=" + enc(continuation));
+        URI uri = new URI(base + "streams/contents?streamId=" + enc(id) + "&count=10000&continuation=" + enc(continuation));
         return getStreamContents(uri);
     }
 
     public StreamContent getStreamContents(URI uri) throws IOException {
-        String data = Request.Get(uri).setHeader(auth).execute().returnContent().asString();
+        String data = getAsString(uri);
         return new Gson().fromJson(data, StreamContent.class);
     }
 
@@ -93,9 +96,26 @@ public class Feedly {
     }
 
     private boolean exec(Request request) throws IOException {
+        requests++;
+        log.info("Request #" + requests + ", " + request.toString());
         int status = request.setHeader(auth).execute()
                 .returnResponse().getStatusLine().getStatusCode();
         return 200 == status;
+    }
+
+    private String getAsString(String urlPart) throws IOException {
+        try {
+            return getAsString(new URI(urlPart));
+        } catch (URISyntaxException ex) {
+            log.warn("Invalid URI", ex);
+            throw new IIOException("invalid URI for "+urlPart, ex);
+        }
+    }
+    
+    private String getAsString(URI urlPart) throws IOException {
+        requests++;
+        log.info("Request #" + requests + ", " + urlPart);
+        return Request.Get(urlPart).setHeader(auth).execute().returnContent().asString();
     }
 
     private String enc(String s) throws UnsupportedEncodingException {
