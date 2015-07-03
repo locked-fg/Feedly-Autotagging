@@ -35,7 +35,7 @@ public class App {
     private static final double autoTagThreshold = 0.9;
 
     // params evaluated through test()
-    private static final BayesCfg BAYES_CFG = new BayesCfg(1, 0.98, 0.02);
+    private static final BayesCfg BAYES_CFG = new BayesCfg(1, 0.94, 0.03);
 
     public static void main(String[] args) throws Exception {
         PropertyConfigurator.configure(App.class.getClassLoader().getResourceAsStream("logging.properties"));
@@ -178,9 +178,9 @@ public class App {
 
         int folds = 15;
         // params in BayesCfg
-        int[] minDocs = {1};
-        double[] maxDocPs = {0.98, 0.97, 0.96, 0.95};
-        double[] minPs = {0.00, 0.01, 0.02, 0.03, 0.04, 0.05};
+        int[] minDocs = {1,2};
+        double[] maxDocPs = {0.98, 0.97, 0.96, 0.95, 0.94};
+        double[] minPs = {0.00, 0.01, 0.015, 0.02, 0.03, 0.04, 0.05};
 
         List<BayesCfg> configs = new ArrayList<>();
         for (int minDoc : minDocs) {
@@ -263,7 +263,7 @@ public class App {
         }
         double precision = tp / (tp + fp);
         double recall = tp / (tp + fn);
-        double beta2 = Math.pow(0.5, 2); // f(0.5) - put weight on precision
+        double beta2 = Math.pow(0.75, 2); // f(0.5) - put weight on precision
         double f = (1 + beta2) * (precision * recall) / (beta2 * precision + recall);
         log.info(String.format("F-Measure: %.02f with %s \t Precision: %.02f, Recall: %.02f",
                 f, cfg, precision, recall));
