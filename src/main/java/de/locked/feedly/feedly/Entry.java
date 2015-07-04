@@ -1,5 +1,7 @@
 package de.locked.feedly.feedly;
 
+import java.util.Arrays;
+
 public class Entry {
 
     public String id;
@@ -25,6 +27,10 @@ public class Entry {
 
     @Override
     public String toString() {
-        return "Entry{title=" + title + ", categories=" + categories + ", author=" + author + ", tags=" + tags + ", engagement=" + engagement + ", published=" + published + ", id=" + id + ", keywords=" + keywords + ", origin=" + origin + ", engagementRate=" + engagementRate + ", crawled=" + crawled + ", unread=" + unread + ", updated=" + updated + ", alternate=" + alternate + '}';
+        return "Entry{title=" + title + ", categories=" + Arrays.toString(categories) + ", author=" + author 
+                + ", tags=" + Arrays.toString(tags) + ", engagement=" + engagement + ", published=" + published 
+                + ", id=" + id + ", keywords=" + Arrays.toString(keywords) + ", origin=" + origin 
+                + ", engagementRate=" + engagementRate + ", crawled=" + crawled + ", unread=" + unread 
+                + ", updated=" + updated + ", alternate=" + Arrays.toString(alternate) + '}';
     }
 }
